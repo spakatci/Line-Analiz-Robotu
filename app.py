@@ -145,7 +145,11 @@ if uploaded_file:
             st.sidebar.divider()
             with st.sidebar.expander("🆕 Yeni Lifestyle Tanımla"):
                 ls_name = st.text_input("Lifestyle Adı (Örn: Casual)")
-                ls_lines = st.multiselect("Paketleri Seç", sorted(cat_df[cols['Line']].unique()))
+                # Hata Düzeltme: unique() değerleri stringe çevir ve boşlukları temizle
+                raw_lines = cat_df[cols['Line']].dropna().unique()
+                sorted_lines = sorted([str(x) for x in raw_lines])
+                
+                ls_lines = st.multiselect("Paketleri Seç", sorted_lines)
                 if st.button("KAYDET"):
                     if ls_name and ls_lines:
                         if selected_cat not in st.session_state['lifestyles']:
@@ -172,7 +176,11 @@ if uploaded_file:
                             active_lines = ls['lines']
 
             # Filtreleme
-            display_df = cat_df[cat_df[cols['Line']].isin(active_lines)] if active_lines else cat_df
+            # Line kolonundaki değerleri de string kıyaslaması için dönüştürüyoruz
+            if active_lines:
+                display_df = cat_df[cat_df[cols['Line']].astype(str).isin(active_lines)]
+            else:
+                display_df = cat_df
 
             # 6. ÜST METRİKLER
             total_s = display_df[cols['Amount']].sum()
