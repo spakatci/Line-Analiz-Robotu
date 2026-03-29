@@ -4,7 +4,7 @@ import numpy as np
 import re
 
 # 1. SAYFA AYARLARI VE MODERN TEMA
-st.set_page_config(page_title="Line Analiz v2.7", layout="wide", page_icon="📊")
+st.set_page_config(page_title="Line Analiz v2.8", layout="wide", page_icon="📊")
 
 # Modern UI Tasarımı (CSS)
 st.markdown("""
@@ -120,7 +120,7 @@ def process_data(file):
         df[final_cols['Qty']] = clean_numeric_refined(df[final_cols['Qty']])
         df[final_cols['Stock']] = clean_numeric_refined(df[final_cols['Stock']])
 
-        # Merch Grup Normalleştirme
+        # Merch Grup Normalleştirme Fonksiyonu
         def normalize_merch(val):
             v = str(val).upper()
             if any(x in v for x in ['WOMAN', 'KADIN']): return 'WOMAN'
@@ -129,7 +129,9 @@ def process_data(file):
             if any(x in v for x in ['GIRL', 'KIZ COCUK']): return 'GIRL'
             return v
         
-        df['Normalized_Div'] = df[final_cols['Div']].apply(normalize_merch)
+        # Orijinal Division sütununu koru, normalize edilmiş Merch değerini ayrı ekle
+        df['Original_Div'] = df[final_cols['Div']].astype(str).str.strip().str.upper()
+        df['Normalized_Merch'] = df[final_cols['Div']].apply(normalize_merch)
         
         return df, final_cols
     except Exception as e:
@@ -144,13 +146,22 @@ if uploaded_file:
     df, cols = process_data(uploaded_file)
     
     if df is not None:
-        # 1. MERCH GRUP SEÇİMİ (Woman, Man, vb.)
-        merch_options = sorted(df['Normalized_Div'].unique())
-        selected_merch = st.sidebar.selectbox("🎯 Merch Grup Seçin", merch_options)
+        # 1. BİRİNCİ SEÇİM KUTUSU: Division Seçin
+        all_divisions = sorted([x for x in df['Original_Div'].unique() if str(x) != 'NAN'])
+        selected_division = st.sidebar.selectbox("🎯 Division Seçin", all_divisions)
         
-        cat_df = df[df['Normalized_Div'] == selected_merch].copy()
+        # Seçilen Division'a göre veriyi filtrele
+        div_filtered_df = df[df['Original_Div'] == selected_division].copy()
         
-        # 2. LIFESTYLE YÖNETİMİ
+        # 2. İKİNCİ SEÇİM KUTUSU: Merch Grup Seçin (Woman, Man vb.)
+        # Bu liste seçilen Division içindeki normalize edilmiş grupları getirir
+        merch_options = sorted(div_filtered_df['Normalized_Merch'].unique())
+        selected_merch = st.sidebar.selectbox("👗 Merch Grup Seçin", merch_options)
+        
+        # Nihai Filtrelenmiş Veri Seti
+        cat_df = div_filtered_df[div_filtered_df['Normalized_Merch'] == selected_merch].copy()
+        
+        # 3. LIFESTYLE YÖNETİMİ
         st.sidebar.divider()
         with st.sidebar.expander("🆕 Lifestyle Tanımla"):
             ls_name = st.text_input("Lifestyle İsmi")
@@ -159,16 +170,19 @@ if uploaded_file:
             
             if st.button("KAYDET"):
                 if ls_name and ls_lines:
-                    if selected_merch not in st.session_state['lifestyles']:
-                        st.session_state['lifestyles'][selected_merch] = []
-                    st.session_state['lifestyles'][selected_merch].append({"name": ls_name, "lines": ls_lines})
+                    # Key olarak Division + Merch kombinasyonu kullanıyoruz ki karışmasın
+                    state_key = f"{selected_division}_{selected_merch}"
+                    if state_key not in st.session_state['lifestyles']:
+                        st.session_state['lifestyles'][state_key] = []
+                    st.session_state['lifestyles'][state_key].append({"name": ls_name, "lines": ls_lines})
                     st.success(f"{ls_name} eklendi!")
                     st.rerun()
 
         # 6. ANA EKRAN
-        st.markdown(f"### 🏷️ {selected_merch} Analiz Paneli")
+        st.markdown(f"### 🏷️ {selected_division} > {selected_merch} Analiz Paneli")
         
-        ls_list = st.session_state['lifestyles'].get(selected_merch, [])
+        state_key = f"{selected_division}_{selected_merch}"
+        ls_list = st.session_state['lifestyles'].get(state_key, [])
         active_lines = []
         is_filtered = False
         
@@ -204,7 +218,6 @@ if uploaded_file:
             st.markdown(f"<div class='main-card'><span class='metric-label'>GRUP COVER</span><br><span class='metric-value' style='color:{c_color}'>{genel_cover:.1f}</span></div>", unsafe_allow_html=True)
 
         # 8. DETAYLI VERİ TABLOSU (DİNAMİK)
-        # Eğer bir filtreleme varsa Ürün (Style) bazında göster, yoksa Paket (Line) bazında özetle
         st.markdown("### 📊 Detaylı Analiz")
         
         if is_filtered:
@@ -216,53 +229,4 @@ if uploaded_file:
             }).reset_index()
             
             detail_analysis['Cover'] = detail_analysis.apply(
-                lambda x: x[cols['Stock']] / x[cols['Qty']] if x[cols['Qty']] > 0 else (99 if x[cols['Stock']] > 0 else 0), axis=1
-            ).round(1)
-            
-            detail_analysis = detail_analysis.sort_values(cols['Amount'], ascending=False)
-            
-            st.dataframe(
-                detail_analysis.rename(columns={
-                    cols['Line']: 'Paket / Line',
-                    cols['Style']: 'Ürün Kısa Kod',
-                    cols['Amount']: 'Ciro',
-                    cols['Qty']: 'Satış Adet',
-                    cols['Stock']: 'Stok Adet'
-                }),
-                use_container_width=True,
-                hide_index=True,
-                column_config={
-                    "Ciro": st.column_config.NumberColumn(format="%d TL"),
-                    "Cover": st.column_config.NumberColumn(format="%.1f")
-                }
-            )
-        else:
-            # Genel Paket Özet Görünümü
-            line_analysis = display_df.groupby(cols['Line']).agg({
-                cols['Amount']: 'sum',
-                cols['Qty']: 'sum',
-                cols['Stock']: 'sum'
-            }).reset_index()
-            
-            line_analysis['Cover'] = line_analysis.apply(
-                lambda x: x[cols['Stock']] / x[cols['Qty']] if x[cols['Qty']] > 0 else (99 if x[cols['Stock']] > 0 else 0), axis=1
-            ).round(1)
-            
-            line_analysis = line_analysis.sort_values(cols['Amount'], ascending=False)
-
-            st.dataframe(
-                line_analysis.rename(columns={
-                    cols['Line']: 'Paket / Line',
-                    cols['Amount']: 'Ciro',
-                    cols['Qty']: 'Satış Adet',
-                    cols['Stock']: 'Stok Adet'
-                }),
-                use_container_width=True,
-                hide_index=True,
-                column_config={
-                    "Ciro": st.column_config.NumberColumn(format="%d TL"),
-                    "Cover": st.column_config.NumberColumn(format="%.1f")
-                }
-            )
-else:
-    st.info("Devam etmek için lütfen bir Excel dosyası yükleyin.")
+                lambda x: x[cols['Stock']] / x[cols['Qty']] if x[cols['Qty']] > 0 else (99 if x[cols['Stock']] > 0 else 0), axis=
