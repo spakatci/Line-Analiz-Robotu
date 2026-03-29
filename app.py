@@ -4,7 +4,7 @@ import numpy as np
 import re
 
 # 1. SAYFA AYARLARI VE MODERN TEMA
-st.set_page_config(page_title="Line Analiz v2.5", layout="wide", page_icon="📊")
+st.set_page_config(page_title="Line Analiz v2.6", layout="wide", page_icon="📊")
 
 # Modern UI Tasarımı (CSS)
 st.markdown("""
@@ -51,15 +51,17 @@ st.markdown("""
 if 'lifestyles' not in st.session_state:
     st.session_state['lifestyles'] = {}
 
-# 3. HASSAS SAYISAL TEMİZLEME
+# 3. HASSAS SAYISAL TEMİZLEME (Para birimi ve format hataları için)
 def clean_numeric_refined(series):
     if series.dtype == 'object':
-        series = series.astype(str).str.strip()
+        # ₺ sembolü, boşluklar ve diğer karakterleri temizle
+        series = series.astype(str).str.replace('₺', '', regex=False).str.strip()
         series = series.replace(r'[^\d.,-]', '', regex=True)
         
         def parse_value(val):
             try:
-                if not val or val == 'nan': return 0.0
+                if not val or val == 'nan' or val == '': return 0.0
+                # Binlik ayırıcı ve ondalık ayırıcı karmaşasını çöz
                 if '.' in val and ',' in val:
                     val = val.replace('.', '').replace(',', '.')
                 elif ',' in val:
@@ -77,7 +79,7 @@ def process_data(file):
         # Başlık tespiti
         df_preview = pd.read_excel(file, nrows=15, header=None)
         header_row = 0
-        keywords = ['line', 'ciro', 'amount', 'stock', 'stok', 'division', 'merch', 'adet', 'qty', 'sub division']
+        keywords = ['line', 'ciro', 'net quantity', 'stock', 'sub division']
         
         for i, row in df_preview.iterrows():
             row_str = " ".join(str(val).lower() for val in row.values)
@@ -87,21 +89,30 @@ def process_data(file):
         
         df = pd.read_excel(file, header=header_row)
         
-        # Kolon Eşleştirme Sözlüğü (Öncelik: Sub Division)
+        # Kolon Eşleştirme Sözlüğü (Talep edilen spesifik sütun isimleri öncelikli)
         mapping = {
             'Line': ['Product Line', 'Line', 'Urun Grubu', 'Koleksiyon', 'LINE', 'Ürün Grubu', 'Model Grubu', 'Paket'],
-            'Amount': ['Net Amount', 'Ciro', 'Tutar', 'Amount', 'CIRO', 'Net Tutar', 'Satış Tutarı', 'Satis Tutari', 'Ciro (Net)'],
-            'Qty': ['Net Quantity', 'Sales Qty', 'Adet', 'Satis', 'ADET', 'Satış Adedi', 'Satis Adedi', 'Miktar'],
-            'Stock': ['Stock', 'Mevcut Stok', 'Quantity', 'Stok', 'STOK', 'Kalan Stok', 'Mevcut', 'Depo Stok'],
-            'Div': ['Sub Division', 'Merch Group', 'Alt Bolum', 'Division', 'BOLUM', 'Bölüm', 'Ana Grup', 'Merch Grup'],
+            'Amount': ['Net Amount Wo Vat (TL)', 'Net Amount', 'Ciro', 'Tutar', 'Amount', 'Net Tutar', 'Satış Tutarı'],
+            'Qty': ['Net Quantity', 'Sales Qty', 'Adet', 'Satis', 'ADET', 'Satış Adedi', 'Miktar'],
+            'Stock': ['Stock', 'Mevcut Stok', 'Quantity', 'Stok', 'STOK', 'Kalan Stok', 'Mevcut'],
+            'Div': ['Sub Division', 'SubDivision', 'Alt Bolum', 'Merch Group', 'Division', 'BOLUM', 'Bölüm'],
         }
 
         final_cols = {}
         for key, patterns in mapping.items():
             for col in df.columns:
-                if any(p.lower() == str(col).lower().strip() or p.lower() in str(col).lower() for p in patterns):
+                # Önce tam eşleşme kontrolü (Case-insensitive)
+                col_name_clean = str(col).strip()
+                if any(p.lower() == col_name_clean.lower() for p in patterns):
                     final_cols[key] = col
                     break
+            
+            # Tam eşleşme bulunamazsa kısmi eşleşmeye bak
+            if key not in final_cols:
+                for col in df.columns:
+                    if any(p.lower() in str(col).lower() for p in patterns):
+                        final_cols[key] = col
+                        break
         
         # Kritik kolon kontrolü
         required = ['Line', 'Amount', 'Qty', 'Stock', 'Div']
@@ -115,7 +126,7 @@ def process_data(file):
         df[final_cols['Qty']] = clean_numeric_refined(df[final_cols['Qty']])
         df[final_cols['Stock']] = clean_numeric_refined(df[final_cols['Stock']])
 
-        # Merch Grup Temizliği
+        # Merch Grup (Sub Division) Temizliği
         df[final_cols['Div']] = df[final_cols['Div']].astype(str).str.strip().str.upper()
         
         return df, final_cols
@@ -131,8 +142,8 @@ if uploaded_file:
     df, cols = process_data(uploaded_file)
     
     if df is not None:
-        # 1. MERCH GRUP SEÇİMİ (Sub Division Verileri)
-        all_merch_groups = sorted(df[cols['Div']].unique())
+        # 1. MERCH GRUP SEÇİMİ (Kesinlikle Sub Division Sütunundan)
+        all_merch_groups = sorted([x for x in df[cols['Div']].unique() if str(x) != 'NAN'])
         selected_merch = st.sidebar.selectbox("🎯 Merch Grup Seçin (Sub Division)", all_merch_groups)
         
         # Filtrelenmiş Veri Seti
