@@ -4,7 +4,7 @@ import numpy as np
 import re
 
 # 1. SAYFA AYARLARI VE MODERN TEMA
-st.set_page_config(page_title="Line Analiz v2.4", layout="wide", page_icon="📊")
+st.set_page_config(page_title="Line Analiz v2.5", layout="wide", page_icon="📊")
 
 # Modern UI Tasarımı (CSS)
 st.markdown("""
@@ -51,21 +51,17 @@ st.markdown("""
 if 'lifestyles' not in st.session_state:
     st.session_state['lifestyles'] = {}
 
-# 3. HASSAS SAYISAL TEMİZLEME (Hatalı veriler için kritik)
+# 3. HASSAS SAYISAL TEMİZLEME
 def clean_numeric_refined(series):
     if series.dtype == 'object':
-        # Önce stringe çevir ve boşlukları temizle
         series = series.astype(str).str.strip()
-        # Para birimi ve gereksiz karakterleri temizle
         series = series.replace(r'[^\d.,-]', '', regex=True)
         
         def parse_value(val):
             try:
                 if not val or val == 'nan': return 0.0
-                # Eğer hem nokta hem virgül varsa (örn: 1.250,50)
                 if '.' in val and ',' in val:
                     val = val.replace('.', '').replace(',', '.')
-                # Eğer sadece virgül varsa ve ondalık gibi duruyorsa (örn: 1250,50)
                 elif ',' in val:
                     val = val.replace(',', '.')
                 return float(val)
@@ -81,7 +77,7 @@ def process_data(file):
         # Başlık tespiti
         df_preview = pd.read_excel(file, nrows=15, header=None)
         header_row = 0
-        keywords = ['line', 'ciro', 'amount', 'stock', 'stok', 'division', 'merch', 'adet', 'qty', 'grup']
+        keywords = ['line', 'ciro', 'amount', 'stock', 'stok', 'division', 'merch', 'adet', 'qty', 'sub division']
         
         for i, row in df_preview.iterrows():
             row_str = " ".join(str(val).lower() for val in row.values)
@@ -91,13 +87,13 @@ def process_data(file):
         
         df = pd.read_excel(file, header=header_row)
         
-        # Kolon Eşleştirme Sözlüğü
+        # Kolon Eşleştirme Sözlüğü (Öncelik: Sub Division)
         mapping = {
             'Line': ['Product Line', 'Line', 'Urun Grubu', 'Koleksiyon', 'LINE', 'Ürün Grubu', 'Model Grubu', 'Paket'],
             'Amount': ['Net Amount', 'Ciro', 'Tutar', 'Amount', 'CIRO', 'Net Tutar', 'Satış Tutarı', 'Satis Tutari', 'Ciro (Net)'],
             'Qty': ['Net Quantity', 'Sales Qty', 'Adet', 'Satis', 'ADET', 'Satış Adedi', 'Satis Adedi', 'Miktar'],
             'Stock': ['Stock', 'Mevcut Stok', 'Quantity', 'Stok', 'STOK', 'Kalan Stok', 'Mevcut', 'Depo Stok'],
-            'Div': ['Sub Division', 'Merch Group', 'Alt Bolum', 'Division', 'BOLUM', 'Bölüm', 'Ana Grup', 'Cinsiyet', 'Merch Grup'],
+            'Div': ['Sub Division', 'Merch Group', 'Alt Bolum', 'Division', 'BOLUM', 'Bölüm', 'Ana Grup', 'Merch Grup'],
         }
 
         final_cols = {}
@@ -119,7 +115,7 @@ def process_data(file):
         df[final_cols['Qty']] = clean_numeric_refined(df[final_cols['Qty']])
         df[final_cols['Stock']] = clean_numeric_refined(df[final_cols['Stock']])
 
-        # Merch Grup Temizliği (Boşlukları al, büyük harf yap)
+        # Merch Grup Temizliği
         df[final_cols['Div']] = df[final_cols['Div']].astype(str).str.strip().str.upper()
         
         return df, final_cols
@@ -135,9 +131,9 @@ if uploaded_file:
     df, cols = process_data(uploaded_file)
     
     if df is not None:
-        # 1. ÖNEMLİ: MERCH GRUP SEÇİMİ
+        # 1. MERCH GRUP SEÇİMİ (Sub Division Verileri)
         all_merch_groups = sorted(df[cols['Div']].unique())
-        selected_merch = st.sidebar.selectbox("🎯 Merch Grup Seçin", all_merch_groups)
+        selected_merch = st.sidebar.selectbox("🎯 Merch Grup Seçin (Sub Division)", all_merch_groups)
         
         # Filtrelenmiş Veri Seti
         cat_df = df[df[cols['Div']] == selected_merch].copy()
@@ -146,7 +142,6 @@ if uploaded_file:
         st.sidebar.divider()
         with st.sidebar.expander("🆕 Lifestyle Tanımla"):
             ls_name = st.text_input("Lifestyle İsmi")
-            # O gruba ait Paketler (Line)
             available_lines = sorted([str(x) for x in cat_df[cols['Line']].dropna().unique()])
             ls_lines = st.multiselect("Paketleri Seç", available_lines)
             
@@ -165,31 +160,39 @@ if uploaded_file:
         active_lines = []
         
         if ls_list:
-            cols_btn = st.columns(len(ls_list) + 1)
+            cols_btn = st.columns(max(len(ls_list) + 1, 6))
             with cols_btn[0]:
                 if st.button("TÜMÜ", use_container_width=True, type="primary"):
                     active_lines = []
             
             for i, ls in enumerate(ls_list):
-                with cols_btn[i+1]:
-                    if st.button(ls['name'], use_container_width=True):
-                        active_lines = ls['lines']
+                if i+1 < len(cols_btn):
+                    with cols_btn[i+1]:
+                        if st.button(ls['name'], key=f"btn_{i}", use_container_width=True):
+                            active_lines = ls['lines']
         
         # Filtre Uygulama
         display_df = cat_df[cat_df[cols['Line']].astype(str).isin(active_lines)] if active_lines else cat_df
 
-        # 7. ÖZET METRİKLER
+        # 7. ÖZET METRİKLER VE GENEL COVER
         t_amount = display_df[cols['Amount']].sum()
         t_qty = display_df[cols['Qty']].sum()
         t_stock = display_df[cols['Stock']].sum()
         
-        m1, m2, m3 = st.columns(3)
+        # GENEL COVER HESAPLAMA: Toplam Stok / Toplam Satış
+        genel_cover = t_stock / t_qty if t_qty > 0 else (99 if t_stock > 0 else 0)
+        
+        m1, m2, m3, m4 = st.columns(4)
         with m1:
             st.markdown(f"<div class='main-card'><span class='metric-label'>TOPLAM CİRO</span><br><span class='metric-value'>{t_amount:,.0f} TL</span></div>", unsafe_allow_html=True)
         with m2:
             st.markdown(f"<div class='main-card'><span class='metric-label'>SATIŞ ADEDİ</span><br><span class='metric-value'>{t_qty:,.0f}</span></div>", unsafe_allow_html=True)
         with m3:
             st.markdown(f"<div class='main-card'><span class='metric-label'>STOK ADEDİ</span><br><span class='metric-value'>{t_stock:,.0f}</span></div>", unsafe_allow_html=True)
+        with m4:
+            # Genel Cover rengi
+            c_color = "#3B82F6" if 6 <= genel_cover <= 9 else ("#EF4444" if genel_cover < 6 else "#F59E0B")
+            st.markdown(f"<div class='main-card'><span class='metric-label'>GENEL COVER</span><br><span class='metric-value' style='color:{c_color}'>{genel_cover:.1f}</span></div>", unsafe_allow_html=True)
 
         # 8. PERFORMANS ANALİZİ (Line Bazlı)
         line_analysis = display_df.groupby(cols['Line']).agg({
@@ -198,30 +201,12 @@ if uploaded_file:
             cols['Stock']: 'sum'
         }).reset_index()
         
-        # Cover Hesabı
+        # Line bazlı Cover Hesabı: (Line Toplam Stok / Line Toplam Satış)
         line_analysis['Cover'] = line_analysis.apply(
             lambda x: x[cols['Stock']] / x[cols['Qty']] if x[cols['Qty']] > 0 else (99 if x[cols['Stock']] > 0 else 0), axis=1
         ).round(1)
         
         line_analysis = line_analysis.sort_values(cols['Amount'], ascending=False)
-
-        # TOP 5 Kartları
-        st.markdown("### 🏆 En İyi Performans Gösteren Paketler")
-        top_cols = st.columns(5)
-        for idx, (i, row) in enumerate(line_analysis.head(5).iterrows()):
-            cv = row['Cover']
-            # Renk mantığı: 6-8 arası ideal (Mavi), altı riskli (Kırmızı), üstü fazla stok (Turuncu)
-            color = "#3B82F6" if 6 <= cv <= 9 else ("#EF4444" if cv < 6 else "#F59E0B")
-            with top_cols[idx]:
-                st.markdown(f"""
-                <div style='background:white; padding:15px; border-radius:20px; border-left:5px solid {color}; box-shadow:0 2px 4px rgba(0,0,0,0.05);'>
-                    <p style='font-size:10px; color:#94A3B8; margin:0;'>#{idx+1} {str(row[cols['Line']])[:15]}</p>
-                    <p style='font-size:16px; font-weight:900; margin:5px 0;'>{row[cols['Amount']]:,.0f} TL</p>
-                    <div style='background:{color}22; color:{color}; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:bold; display:inline-block;'>
-                        COVER: {cv}
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
 
         # 9. DETAY TABLO
         st.markdown("### 📊 Detaylı Veri Tablosu")
@@ -236,7 +221,7 @@ if uploaded_file:
             hide_index=True,
             column_config={
                 "Ciro": st.column_config.NumberColumn(format="%d TL"),
-                "Cover": st.column_config.ProgressColumn(min_value=0, max_value=20, format="%.1f")
+                "Cover": st.column_config.NumberColumn(format="%.1f")
             }
         )
 else:
