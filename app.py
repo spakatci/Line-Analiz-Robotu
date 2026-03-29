@@ -86,13 +86,13 @@ def process_data(file):
         
         df = pd.read_excel(file, header=header_row)
         
-        # Kolon Eşleştirme
+        # Kolon Eşleştirme - İsteğiniz üzerine Merch/Div kaynağı "Sub Division" olarak güncellendi
         mapping = {
             'Line': ['Product Line', 'Line', 'Urun Grubu', 'Koleksiyon', 'LINE', 'Paket'],
             'Amount': ['Net Amount Wo Vat (TL)', 'Net Amount', 'Ciro', 'Tutar', 'Amount'],
             'Qty': ['Net Quantity', 'Sales Qty', 'Adet', 'Satis', 'Miktar'],
             'Stock': ['Stock', 'Mevcut Stok', 'Quantity', 'Stok', 'STOK'],
-            'Div': ['Division', 'Merch Group', 'Main Group', 'Ana Grup'],
+            'Div': ['Sub Division', 'Division', 'Merch Group', 'Main Group', 'Ana Grup'], # Sub Division ilk sırada
             'Style': ['Short Code', 'Style', 'Model', 'Kısa Kod', 'Kod', 'Model Kodu']
         }
 
@@ -112,7 +112,7 @@ def process_data(file):
         required = ['Line', 'Amount', 'Qty', 'Stock', 'Div', 'Style']
         missing = [r for r in required if r not in final_cols]
         if missing:
-            st.error(f"Eşleşmeyen Sütunlar: {missing}. Excel başlıklarını kontrol edin.")
+            st.error(f"Eksik Sütun Hatası: Özellikle 'Sub Division' veya 'Division' sütunu bulunamadı. Eksik alanlar: {missing}")
             return None, None
 
         # Sayısal Temizlik
@@ -129,8 +129,9 @@ def process_data(file):
             if any(x in v for x in ['GIRL', 'KIZ COCUK']): return 'GIRL'
             return v
         
-        # Orijinal Division sütununu koru, normalize edilmiş Merch değerini ayrı ekle
+        # Orijinal Division (Sub Division kaynaklı) sütununu koru
         df['Original_Div'] = df[final_cols['Div']].astype(str).str.strip().str.upper()
+        # "Sub Division" alanından gelen veriyi Woman/Man vb. olarak standardize et
         df['Normalized_Merch'] = df[final_cols['Div']].apply(normalize_merch)
         
         return df, final_cols
@@ -146,14 +147,14 @@ if uploaded_file:
     df, cols = process_data(uploaded_file)
     
     if df is not None:
-        # 1. BİRİNCİ SEÇİM KUTUSU: Division Seçin
+        # 1. BİRİNCİ SEÇİM KUTUSU: Division Seçin (Excel'deki Sub Division sütunundan gelir)
         all_divisions = sorted([x for x in df['Original_Div'].unique() if str(x) != 'NAN'])
         selected_division = st.sidebar.selectbox("🎯 Division Seçin", all_divisions)
         
         # Seçilen Division'a göre veriyi filtrele
         div_filtered_df = df[df['Original_Div'] == selected_division].copy()
         
-        # 2. İKİNCİ SEÇİM KUTUSU: Merch Grup Seçin (Woman, Man vb.)
+        # 2. İKİNCİ SEÇİM KUTUSU: Merch Grup Seçin (Normalize edilmiş veriden gelir)
         merch_options = sorted(div_filtered_df['Normalized_Merch'].unique())
         selected_merch = st.sidebar.selectbox("👗 Merch Grup Seçin", merch_options)
         
@@ -219,14 +220,13 @@ if uploaded_file:
         st.markdown("### 📊 Detaylı Analiz")
         
         if is_filtered:
-            # Ürün Detay Görünümü (Kısa Kod Bazında)
+            # Ürün Detay Görünümü
             detail_analysis = display_df.groupby([cols['Line'], cols['Style']]).agg({
                 cols['Amount']: 'sum',
                 cols['Qty']: 'sum',
                 cols['Stock']: 'sum'
             }).reset_index()
             
-            # SyntaxError düzeltilen kısım
             detail_analysis['Cover'] = detail_analysis.apply(
                 lambda x: x[cols['Stock']] / x[cols['Qty']] if x[cols['Qty']] > 0 else (99 if x[cols['Stock']] > 0 else 0), 
                 axis=1
