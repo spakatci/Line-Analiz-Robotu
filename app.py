@@ -154,7 +154,6 @@ if uploaded_file:
         div_filtered_df = df[df['Original_Div'] == selected_division].copy()
         
         # 2. İKİNCİ SEÇİM KUTUSU: Merch Grup Seçin (Woman, Man vb.)
-        # Bu liste seçilen Division içindeki normalize edilmiş grupları getirir
         merch_options = sorted(div_filtered_df['Normalized_Merch'].unique())
         selected_merch = st.sidebar.selectbox("👗 Merch Grup Seçin", merch_options)
         
@@ -170,7 +169,6 @@ if uploaded_file:
             
             if st.button("KAYDET"):
                 if ls_name and ls_lines:
-                    # Key olarak Division + Merch kombinasyonu kullanıyoruz ki karışmasın
                     state_key = f"{selected_division}_{selected_merch}"
                     if state_key not in st.session_state['lifestyles']:
                         st.session_state['lifestyles'][state_key] = []
@@ -228,5 +226,57 @@ if uploaded_file:
                 cols['Stock']: 'sum'
             }).reset_index()
             
+            # SyntaxError düzeltilen kısım
             detail_analysis['Cover'] = detail_analysis.apply(
-                lambda x: x[cols['Stock']] / x[cols['Qty']] if x[cols['Qty']] > 0 else (99 if x[cols['Stock']] > 0 else 0), axis=
+                lambda x: x[cols['Stock']] / x[cols['Qty']] if x[cols['Qty']] > 0 else (99 if x[cols['Stock']] > 0 else 0), 
+                axis=1
+            ).round(1)
+            
+            detail_analysis = detail_analysis.sort_values(cols['Amount'], ascending=False)
+            
+            st.dataframe(
+                detail_analysis.rename(columns={
+                    cols['Line']: 'Paket / Line',
+                    cols['Style']: 'Ürün Kısa Kod',
+                    cols['Amount']: 'Ciro',
+                    cols['Qty']: 'Satış Adet',
+                    cols['Stock']: 'Stok Adet'
+                }),
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Ciro": st.column_config.NumberColumn(format="%d TL"),
+                    "Cover": st.column_config.NumberColumn(format="%.1f")
+                }
+            )
+        else:
+            # Genel Paket Özet Görünümü
+            line_analysis = display_df.groupby(cols['Line']).agg({
+                cols['Amount']: 'sum',
+                cols['Qty']: 'sum',
+                cols['Stock']: 'sum'
+            }).reset_index()
+            
+            line_analysis['Cover'] = line_analysis.apply(
+                lambda x: x[cols['Stock']] / x[cols['Qty']] if x[cols['Qty']] > 0 else (99 if x[cols['Stock']] > 0 else 0), 
+                axis=1
+            ).round(1)
+            
+            line_analysis = line_analysis.sort_values(cols['Amount'], ascending=False)
+
+            st.dataframe(
+                line_analysis.rename(columns={
+                    cols['Line']: 'Paket / Line',
+                    cols['Amount']: 'Ciro',
+                    cols['Qty']: 'Satış Adet',
+                    cols['Stock']: 'Stok Adet'
+                }),
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Ciro": st.column_config.NumberColumn(format="%d TL"),
+                    "Cover": st.column_config.NumberColumn(format="%.1f")
+                }
+            )
+else:
+    st.info("Devam etmek için lütfen bir Excel dosyası yükleyin.")
