@@ -97,14 +97,14 @@ def process_data(file):
             col_name = final_cols[k]
             df[col_name] = pd.to_numeric(df[col_name], errors='coerce').fillna(0)
 
-        # Kategori Normalleştirme
+        # Kategori Normalleştirme (Esnek Eşleştirme)
         def normalize_div(val):
-            val = str(val).upper()
-            if any(x in val for x in ['WOMAN', 'KADIN']): return 'WOMAN'
-            if any(x in val for x in ['MAN', 'ERKEK']): return 'MAN'
+            val = str(val).upper().replace('İ', 'I').replace('Ş', 'S').replace('Ç', 'C').replace('Ö', 'O').replace('Ü', 'U').replace('Ğ', 'G')
+            if any(x in val for x in ['WOMAN', 'KADIN', 'BAYAN', 'WD']): return 'WOMAN'
+            if any(x in val for x in ['MAN', 'ERKEK', 'BAY', 'MD']): return 'MAN'
             if any(x in val for x in ['GIRL', 'KIZ']): return 'GIRL'
-            if any(x in val for x in ['BOY', 'ERKEK ÇOCUK']): return 'BOY'
-            return 'OTHER'
+            if any(x in val for x in ['BOY', 'ERKEK COCUK']): return 'BOY'
+            return val # Eşleşmezse orijinali döndür (Hata ayıklama için)
         
         df['Normalized_Div'] = df[final_cols['Div']].apply(normalize_div)
         return df, final_cols
@@ -120,14 +120,26 @@ if uploaded_file:
     df, cols = process_data(uploaded_file)
     
     if df is not None:
+        # Mevcut kategorileri tespit et
+        existing_cats = df['Normalized_Div'].unique()
+        
         # Merch Grup Seçimi
-        available_cats = ["WOMAN", "MAN", "GIRL", "BOY"]
-        selected_cat = st.sidebar.selectbox("Analiz Edilecek Grubu Seçin", available_cats)
+        standard_cats = ["WOMAN", "MAN", "GIRL", "BOY"]
+        # Eğer standartlar dışı bir kategori varsa listeye ekle
+        final_category_options = [c for c in standard_cats if c in existing_cats] + [c for c in existing_cats if c not in standard_cats]
+        
+        if not final_category_options:
+            st.error("Excel dosyasında kategori sütunu (Division) boş görünüyor.")
+            st.stop()
+
+        selected_cat = st.sidebar.selectbox("Analiz Edilecek Grubu Seçin", final_category_options)
         
         cat_df = df[df['Normalized_Div'] == selected_cat].copy()
         
         if cat_df.empty:
-            st.warning(f"Seçilen grupta ({selected_cat}) veri bulunamadı.")
+            st.warning(f"Seçilen grupta ({selected_cat}) veri bulunamadı. Lütfen Excel'deki kategori isimlerini kontrol edin.")
+            with st.expander("Sistem Tarafından Okunan Kategoriler"):
+                st.write(existing_cats)
         else:
             # Lifestyle Yönetimi
             st.sidebar.divider()
@@ -136,6 +148,8 @@ if uploaded_file:
                 ls_lines = st.multiselect("Paketleri Seç", sorted(cat_df[cols['Line']].unique()))
                 if st.button("KAYDET"):
                     if ls_name and ls_lines:
+                        if selected_cat not in st.session_state['lifestyles']:
+                            st.session_state['lifestyles'][selected_cat] = []
                         st.session_state['lifestyles'][selected_cat].append({"name": ls_name, "lines": ls_lines})
                         st.success(f"{ls_name} Kaydedildi!")
                         st.rerun()
